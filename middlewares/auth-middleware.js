@@ -1,9 +1,9 @@
 // middlewares/auth-middleware.js
 
 const jwt = require("jsonwebtoken");
-const {Users} = require("../models");
+const { Users } = require("../models");
 
-const SECRET_KEY = 'love';
+const SECRET_KEY = "love";
 
 module.exports = async (req, res, next) => {
   const { authorization } = req.headers;
@@ -14,7 +14,7 @@ module.exports = async (req, res, next) => {
   console.log(`🧆 authToken: ${authToken}`);
 
   if (!authToken || authType !== "Bearer") {
-    console.log(`🧆 토큰에 문제가 있다`)
+    console.log(`🧆 토큰에 문제가 있다`);
     res.status(401).send({
       errorMessage: "🧆로그인 후 이용 가능한 기능입니다.(토큰이 없거나 Bearer Auth가 아님)",
     });
@@ -24,17 +24,20 @@ module.exports = async (req, res, next) => {
   try {
     const { nickname } = jwt.verify(authToken, SECRET_KEY);
     console.log(`🧆🧆 nickname: ${nickname} `);
-    const nicknameAtServer = await Users.findOne({name: nickname});
-    res.locals.user = nicknameAtServer['dataValues']['name'];
-    console.log(`🧆🧆 당신은 글을 써도 됩니다. ${res.locals.user}님`)
-    
-    next();
+    const nicknameAtServer = await Users.findOne({ name: nickname });
 
+    res.locals.user = nicknameAtServer["dataValues"]["name"];
+    res.locals.userId = nicknameAtServer["dataValues"]["userId"];
+
+    console.log(`🧆🧆 당신은 글을 써도 됩니다. ${res.locals.user}님`);
+    console.log(`🧆test: ${nicknameAtServer["dataValues"]["userId"]}`);
   } catch (err) {
-    console.log(`🧆err: ${err}`)
+    console.log(`🧆err: ${err}`);
     res.status(401).send({
       errorMessage: "🧆 로그인 후 이용 가능한 기능입니다.(토큰 검증 실패)",
     });
+    return;
   }
 
+  next();
 };

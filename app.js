@@ -1,7 +1,6 @@
-
 // express.js setup
 const express = require("express");
-const cookieParser = require('cookie-parser');
+const cookieParser = require("cookie-parser");
 
 const app = express();
 const port = 3000;
@@ -12,11 +11,11 @@ connect();
 
 const routers = require("./routes/index");
 
-const { sequelize } = require('./models/index.js');
+const { sequelize } = require("./models/index.js");
 async function main() {
-  // sequelize에 테이블들이 존재하지 않는 경우 태이블을 생성합니다. 
+  // sequelize에 테이블들이 존재하지 않는 경우 태이블을 생성합니다.
   await sequelize.sync();
-  // await sequelize.sync({force: true}); // DB 밀어버리고 재생성
+  // await sequelize.sync({ force: true }); // DB 밀어버리고 재생성
 }
 main();
 
