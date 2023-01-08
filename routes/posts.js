@@ -1,15 +1,15 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
 
-const authMiddleware = require("../middlewares/auth-middleware");
+const authMiddleware = require('../middlewares/auth-middleware');
 
-const jwt = require("jsonwebtoken");
-const SECRET_KEY = "love";
+const jwt = require('jsonwebtoken');
+const SECRET_KEY = 'love';
 
-const { Users, Posts, UserInfos, Likes } = require("../models");
+const { Users, Posts, UserInfos, Likes, sequelize } = require('../models');
 
 // * 게시글 등록 API
-router.post("/posts", authMiddleware, async (req, res) => {
+router.post('/posts', authMiddleware, async (req, res) => {
   try {
     const { title, content } = req.body;
     const accessToken = req.cookies.accessToken;
@@ -19,32 +19,31 @@ router.post("/posts", authMiddleware, async (req, res) => {
     // console.log(`refreshToken: ${refreshToken}`)
 
     // # 412 body 데이터가 정상적으로 전달되지 않는 경우
-    if (Object.keys(req.body).length === 0) res.status(400).json({ errorMessage: "데이터 형식이 올바르지 않습니다." });
+    if (Object.keys(req.body).length === 0) res.status(400).json({ errorMessage: '데이터 형식이 올바르지 않습니다.' });
 
     // # 412 Title의 형식이 비정상적인 경우
-    if (!title) res.status(400).json({ errorMessage: "게시글 제목의 형식이 일치하지 않습니다." });
+    if (!title) res.status(400).json({ errorMessage: '게시글 제목의 형식이 일치하지 않습니다.' });
 
     // # 412 Content의 형식이 비정상적인 경우
-    if (!content) res.status(400).json({ errorMessage: "게시글 내용의 형식이 일치하지 않습니다." });
+    if (!content) res.status(400).json({ errorMessage: '게시글 내용의 형식이 일치하지 않습니다.' });
 
     // # 403 Cookie가 존재하지 않을 경우
-    if (!refreshToken) return res.status(400).json({ errorMessage: "로그인이 필요한 기능입니다." });
-    if (!accessToken) return res.status(400).json({ errorMessage: "로그인이 필요한 기능입니다." });
+    if (!refreshToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
+    if (!accessToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
 
     // refresh/access 유효 여부 검사
     const isAccessTokenValidate = validateToken(accessToken);
     const isRefreshTokenValidate = validateToken(refreshToken);
 
     // # 403 Cookie가 비정상적이거나 만료된 경우
-    if (!isRefreshTokenValidate) return res.status(419).json({ errorMessage: "전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)" });
-    if (!isAccessTokenValidate) return res.status(419).json({ errorMessage: "전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)" });
+    if (!isRefreshTokenValidate) return res.status(419).json({ errorMessage: '전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)' });
+    if (!isAccessTokenValidate) return res.status(419).json({ errorMessage: '전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)' });
 
     // 토큰 활용하여 userId 추출
     const nameFromToken = getAccessTokenPayload(accessToken);
     console.log(`🐞당신은.. ${nameFromToken}`);
-
     const userIdAtServer = await Users.findOne({ where: { name: nameFromToken } });
-    const userNameAtServer = userIdAtServer["dataValues"]["userId"];
+    const userNameAtServer = userIdAtServer['dataValues']['userId'];
     // console.log(`🐞userNameAtServer: ${userNameAtServer}`)
 
     // Insert data
@@ -54,40 +53,87 @@ router.post("/posts", authMiddleware, async (req, res) => {
         title: title,
         content: content,
       });
-      return res.json({ message: "게시글 작성에 성공하였습니다." });
+      return res.json({ message: '게시글 작성에 성공하였습니다.' });
     }
   } catch (error) {
     // # 400 예외 케이스에서 처리하지 못한 에러
-    return res.status(400).json({ errorMessage: "게시글 작성에 실패하였습니다." });
+    return res.status(400).json({ errorMessage: '게시글 작성에 실패하였습니다.' });
   }
 });
 
 // * 전체 게시글 조회 API
-router.get("/posts", async (req, res) => {
+router.get('/posts', async (req, res) => {
   try {
-    const results = await Posts.findAll({
-      include: [{ model: Users, attributes: ["name"] }],
-    });
-    res.json({ data: results });
+    // const results = await Posts.findAll({
+    //   include: [{ model: Users, attributes: ['name'] }],
+    // });
+    // res.json({ data: results });
+
+    // const [result, metadata] = await sequelize.query(`
+    // SELECT
+    //   p.postId,
+    //   p.UserId,
+    //   u.name,
+    //   p.title,
+    //   p.createdAt,
+    //   p.updatedAt,
+    //   COUNT(likeId) as likes
+    // FROM Posts p
+    // INNER JOIN Users u on p.UserId = u.userId
+    // LEFT JOIN Likes l on p.postId = l.PostId GROUP by p.postId
+    // `);
+
+    const [result, metadata] = await sequelize.query(`
+    select 
+      p.postId, 
+      p.UserId, 
+      u.name as nickname, 
+      p.title, 
+      p.createdAt, 
+      p.updatedAt, 
+      (select count(l.isLiked) from Likes l where l.postId = p.postId) as likes 
+    from Posts p 
+    inner join Users u on p.UserId = u.userId
+    `);
+
+    res.json({ data: result });
     return;
   } catch (error) {
-    return res.status(400).json({ errorMessage: "게시글 조회에 실패하였습니다." });
+    console.log(`🐞error: ${error}`);
+    return res.status(400).json({ errorMessage: '게시글 조회에 실패하였습니다.' });
   }
 });
 
 // * 게시글 상세 조회 API
-router.get("/posts/:postId", async (req, res) => {
+router.get('/posts/:postId', async (req, res) => {
   try {
     const { postId } = req.params;
-    const result = await Posts.findOne({ where: { postId: postId } });
+    // const result = await Posts.findOne({ where: { postId: postId } });
+
+    const [result, metadata] = await sequelize.query(`
+    select 
+      p.postId, 
+      p.UserId, 
+      u.name as nickname,
+      p.title, 
+      p.content, 
+      p.createdAt, 
+      p.updatedAt, 
+      (select count(isLiked) from Likes l
+      where l.PostId = p.postId) as likes 
+    from Posts p
+    inner join Users u ON p.UserId = u.userId
+    where p.postId=${postId}`);
+
     return res.json({ data: result });
   } catch (error) {
-    return res.status(400).json({ errorMessage: "게시글 조회에 실패하였습니다." });
+    console.log(`🐞error: ${error}`);
+    return res.status(400).json({ errorMessage: '게시글 조회에 실패하였습니다.' });
   }
 });
 
 // * 게시글 수정 API
-router.put("/posts/:postId", authMiddleware, async (req, res) => {
+router.put('/posts/:postId', authMiddleware, async (req, res) => {
   try {
     console.log(`🐞 res.locals.user : ${res.locals.user}`);
 
@@ -101,20 +147,20 @@ router.put("/posts/:postId", authMiddleware, async (req, res) => {
 
     // # 412 body 데이터가 정상적으로 전달되지 않는 경우
     if (Object.keys(req.body).length === 0) {
-      res.status(400).json({ errorMessage: "데이터 형식이 올바르지 않습니다." });
+      res.status(400).json({ errorMessage: '데이터 형식이 올바르지 않습니다.' });
       return;
     }
     // # 412 Title의 형식이 비정상적인 경우
     if (!title) {
-      res.status(400).json({ errorMessage: "게시글 제목의 형식이 일치하지 않습니다." });
+      res.status(400).json({ errorMessage: '게시글 제목의 형식이 일치하지 않습니다.' });
     }
     // # 412 Content의 형식이 비정상적인 경우
     if (!content) {
-      res.status(400).json({ errorMessage: "게시글 내용의 형식이 일치하지 않습니다." });
+      res.status(400).json({ errorMessage: '게시글 내용의 형식이 일치하지 않습니다.' });
     }
     // # 403 Cookie가 존재하지 않을 경우
-    if (!refreshToken) return res.status(400).json({ errorMessage: "로그인이 필요한 기능입니다." });
-    if (!accessToken) return res.status(400).json({ errorMessage: "로그인이 필요한 기능입니다." });
+    if (!refreshToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
+    if (!accessToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
 
     // refresh/access 유효 여부 검사
     const isAccessTokenValidate = validateToken(accessToken);
@@ -123,11 +169,11 @@ router.put("/posts/:postId", authMiddleware, async (req, res) => {
     // # 403 Cookie가 비정상적이거나 만료된 경우
     if (!isRefreshTokenValidate)
       return res.status(419).json({
-        errorMessage: "전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)",
+        errorMessage: '전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)',
       });
     if (!isAccessTokenValidate)
       return res.status(419).json({
-        errorMessage: "전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)",
+        errorMessage: '전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)',
       });
 
     // 토큰 검사 후 해당 사용자와 작성자 동일한 지 검증
@@ -137,14 +183,14 @@ router.put("/posts/:postId", authMiddleware, async (req, res) => {
 
     // 서버 유저 아이디 : 서버에 등록된 글 작성자
     const personWhoPosted = await Posts.findOne({
-      attributes: ["postId", "UserId"],
+      attributes: ['postId', 'UserId'],
       where: { postId: postId },
     });
-    const userIdWhoPostedAtServer = personWhoPosted["dataValues"]["UserId"];
+    const userIdWhoPostedAtServer = personWhoPosted['dataValues']['UserId'];
     const userNameWhoPostedAtServer = await Users.findOne({
       where: { userId: userIdWhoPostedAtServer },
     });
-    const userNameAtServer = userNameWhoPostedAtServer["dataValues"]["name"];
+    const userNameAtServer = userNameWhoPostedAtServer['dataValues']['name'];
     // console.log(`🐞 userIdWhoPostedAtServer: ${userIdWhoPostedAtServer}`)
     // console.log(`🐞 userNameWhoPostedAtServer: ${userNameWhoPostedAtServer}`)
     // console.log(`🐞 userNameAtServer: ${userNameAtServer}`)
@@ -152,7 +198,7 @@ router.put("/posts/:postId", authMiddleware, async (req, res) => {
     // 두개 동일하지 않으면 에러
     if (nameFromToken !== userNameAtServer)
       return res.status(419).json({
-        errorMessage: "당신이 작성한 글이 아닙니다.(작성자 불일치 에러)",
+        errorMessage: '당신이 작성한 글이 아닙니다.(작성자 불일치 에러)',
       });
 
     // 게시글 찾기
@@ -162,18 +208,18 @@ router.put("/posts/:postId", authMiddleware, async (req, res) => {
     if (result) {
       // * 게시글 수정
       await Posts.update({ content: content }, { where: { postId: postId } });
-      return res.json({ errorMessage: "게시글을 수정하였습니다." });
+      return res.json({ errorMessage: '게시글을 수정하였습니다.' });
     }
     // # 401 게시글 수정이 실패한 경우
-    return res.status(401).json({ errorMessage: "게시글이 정상적으로 수정되지 않았습니다." });
+    return res.status(401).json({ errorMessage: '게시글이 정상적으로 수정되지 않았습니다.' });
   } catch (error) {
     // # 400 예외 케이스에서 처리하지 못한 에러
-    return res.status(400).json({ errorMessage: "게시글 수정에 실패하였습니다." });
+    return res.status(400).json({ errorMessage: '게시글 수정에 실패하였습니다.' });
   }
 });
 
 // * 게시글 삭제 API
-router.delete("/posts/:postId", authMiddleware, async (req, res) => {
+router.delete('/posts/:postId', authMiddleware, async (req, res) => {
   try {
     const { postId } = req.params;
     const { title, content } = req.body;
@@ -186,12 +232,12 @@ router.delete("/posts/:postId", authMiddleware, async (req, res) => {
 
     // # 404 게시글이 존재하지 않는경우
     if (!result) {
-      return res.status(400).json({ errorMessage: "게시글이 존재하지 않습니다." });
+      return res.status(400).json({ errorMessage: '게시글이 존재하지 않습니다.' });
     }
 
     // # 403 Cookie가 존재하지 않을 경우
-    if (!refreshToken) return res.status(400).json({ errorMessage: "로그인이 필요한 기능입니다." });
-    if (!accessToken) return res.status(400).json({ errorMessage: "로그인이 필요한 기능입니다." });
+    if (!refreshToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
+    if (!accessToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
 
     // refresh/access 유효 여부 검사
     const isAccessTokenValidate = validateToken(accessToken);
@@ -200,11 +246,11 @@ router.delete("/posts/:postId", authMiddleware, async (req, res) => {
     // # 403 Cookie가 비정상적이거나 만료된 경우
     if (!isRefreshTokenValidate)
       return res.status(419).json({
-        errorMessage: "전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)",
+        errorMessage: '전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)',
       });
     if (!isAccessTokenValidate)
       return res.status(419).json({
-        errorMessage: "전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)",
+        errorMessage: '전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)',
       });
 
     // 토큰 검사 후 해당 사용자와 작성자 동일한 지 검증
@@ -214,58 +260,59 @@ router.delete("/posts/:postId", authMiddleware, async (req, res) => {
 
     // 서버 유저 아이디 : 서버에 등록된 글 작성자
     const personWhoPosted = await Posts.findOne({
-      attributes: ["postId", "UserId"],
+      attributes: ['postId', 'UserId'],
       where: { postId: postId },
     });
-    const userIdWhoPostedAtServer = personWhoPosted["dataValues"]["UserId"];
+    const userIdWhoPostedAtServer = personWhoPosted['dataValues']['UserId'];
     const userNameWhoPostedAtServer = await Users.findOne({
       where: { userId: userIdWhoPostedAtServer },
     });
-    const userNameAtServer = userNameWhoPostedAtServer["dataValues"]["name"];
+    const userNameAtServer = userNameWhoPostedAtServer['dataValues']['name'];
 
     // 두개 동일하지 않으면 에러
     if (nameFromToken !== userNameAtServer)
       return res.status(419).json({
-        errorMessage: "당신이 작성한 글이 아닙니다.(작성자 불일치 에러)",
+        errorMessage: '당신이 작성한 글이 아닙니다.(작성자 불일치 에러)',
       });
 
     // * 게시글 삭제(게시글 존재하는 경우)
     if (result) {
       await Posts.destroy({ where: { postId: postId } });
-      return res.json({ errorMessage: "게시글을 삭제하였습니다." });
+      return res.json({ errorMessage: '게시글을 삭제하였습니다.' });
     }
 
     // # 401 게시글 삭제에 실패한 경우
-    return res.status(401).json({ errorMessage: "게시글이 정상적으로 삭제되지 않았습니다." });
+    return res.status(401).json({ errorMessage: '게시글이 정상적으로 삭제되지 않았습니다.' });
   } catch (error) {
     // # 400 예외 케이스에서 처리하지 못한 에러
-    return res.status(400).json({ errorMessage: "게시글 작성에 실패하였습니다." });
+    return res.status(400).json({ errorMessage: '게시글 작성에 실패하였습니다.' });
   }
 });
 
 // * 게시글 좋아요 - PUT method
-router.put("/posts/:postId/like", authMiddleware, async (req, res) => {
+router.put('/posts/:postId/like', authMiddleware, async (req, res) => {
   try {
     const { postId } = req.params;
-    const username = res.locals.user;
+    const userId = res.locals.userId;
 
     console.log(`🧡 res.locals.user: ${res.locals.user}`);
     console.log(`🧡 postId: ${postId}`);
+    console.log(`🧡 userId: ${userId}`);
 
     const accessToken = req.cookies.accessToken;
     const refreshToken = req.cookies.refreshToken;
 
     // # 403 Cookie가 존재하지 않을 경우
-    if (!refreshToken) return res.status(400).json({ errorMessage: "로그인이 필요한 기능입니다." });
-    if (!accessToken) return res.status(400).json({ errorMessage: "로그인이 필요한 기능입니다." });
+    if (!refreshToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
+    if (!accessToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
 
     // refresh/access 유효 여부 검사
     const isAccessTokenValidate = validateToken(accessToken);
     const isRefreshTokenValidate = validateToken(refreshToken);
 
     // # 403 Cookie가 비정상적이거나 만료된 경우
-    if (!isRefreshTokenValidate) return res.status(419).json({ errorMessage: "전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)" });
-    if (!isAccessTokenValidate) return res.status(419).json({ errorMessage: "전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)" });
+    if (!isRefreshTokenValidate) return res.status(419).json({ errorMessage: '전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)' });
+    if (!isAccessTokenValidate) return res.status(419).json({ errorMessage: '전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)' });
 
     // 게시글 조회
     const result = await Posts.findOne({ where: { postId: postId } });
@@ -273,38 +320,37 @@ router.put("/posts/:postId/like", authMiddleware, async (req, res) => {
 
     // # 404 게시글이 존재하지 않는경우
     if (!result) {
-      return res.status(400).json({ errorMessage: "게시글이 존재하지 않습니다." });
+      return res.status(400).json({ errorMessage: '게시글이 존재하지 않습니다.' });
     }
+    const postToLike = await Likes.findOne({ where: { postId: postId, UserId: userId } });
+    console.log(`🤡postToLike: ${JSON.stringify(postToLike)}`);
 
-    const postToLike = await Likes.findOne({ where: { UserId: res.locals.userId } });
-    console.log(`🤡postToLike: ${postToLike}`);
-
-    // 유저의 해당 게시글의 좋아요 기록 없는 경우 경우 ->
-    // - create new like data with value 1
-
-    /*if(postToLike) {
-      patch like value data to 
-
-
-    } else {
-      // In case there is no like data,
-
-      create new like data with value 1
-
-        await Likes.create({
-      UserId: 1, // dummy value 🤡
-      PostId: 1,
+    // 좋아요 없는 경우 좋아요 데이터 생성하기
+    if (!postToLike) {
+      await Likes.create({
+        UserId: res.locals.userId,
+        PostId: postId,
+        isLiked: 1,
       });
+      return res.json({ Message: '게시글의 좋아요를 등록하였습니다.' });
     }
 
-    */
+    if (postToLike['isLiked']) {
+      console.log(`🤡postToLike[isLiked]: ${JSON.stringify(postToLike['isLiked'])}`);
+      await Likes.update({ isLiked: 0 }, { where: { PostId: postId } });
+      return res.json({ Message: '게시글의 좋아요를 취소하였습니다.' });
+    } else {
+      console.log(`🤡postToLike[isLiked]: ${JSON.stringify(postToLike['isLiked'])}`);
+      await Likes.update({ isLiked: 1 }, { where: { PostId: postId, UserId: userId } });
+      return res.json({ Message: '게시글의 좋아요로 변경하였습니다.' });
+    }
 
-    return res.json({ data: result });
+    return res.status(400).json({ errorMessage: '게시글 좋아요에 실패하였습니다.' });
   } catch (error) {
     console.log(`🧡 error: ${error}`);
 
     // # 400 예외 케이스에서 처리하지 못한 에러
-    return res.status(400).json({ errorMessage: "게시글 조회에 실패하였습니다." });
+    return res.status(400).json({ errorMessage: '게시글 좋아요에 실패하였습니다.' });
   }
 });
 
@@ -331,7 +377,7 @@ function getAccessTokenPayload(accessToken) {
 // Access Token 생성 함수
 function createAccessToken(nickname) {
   const accessToken = jwt.sign({ nickname: nickname }, SECRET_KEY, {
-    expiresIn: "20s",
+    expiresIn: '20s',
   });
 
   return accessToken;
@@ -339,7 +385,7 @@ function createAccessToken(nickname) {
 
 // Refresh Token 생성 함수
 function createRefreshToken() {
-  const refreshToken = jwt.sign({}, SECRET_KEY, { expiresIn: "1d" });
+  const refreshToken = jwt.sign({}, SECRET_KEY, { expiresIn: '1d' });
 
   return refreshToken;
 }
