@@ -1,78 +1,138 @@
-// [commentsRouter] for '/api/comments'
-
-// console.log("💥💥💥💥💥💥💥💥💥💥💥💥💥💥💥💥💥💥💥💥");
-// console.log("🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡");
-// ------------------------------------------
 const express = require('express');
 const router = express.Router();
 
-const Posts = require('../schemas/post.js');
-const Comments = require('../schemas/comment.js');
+const authMiddleware = require('../middlewares/auth-middleware');
+const jwt = require('jsonwebtoken');
+const SECRET_KEY = 'love';
+
+const { Posts, Comments, sequelize } = require('../models');
 
 // * 7.댓글 작성
 // url : api/comments/:_postId
 // - todo 댓글 내용 비워두고 댓글 작성 API 호출 시 -> '댓글 내용 입력해주세요' 메시지 return하기 기능
-router.post('/comments/:_postId', async (req, res) => {
-  const { _postId } = req.params;
-  const { user, password, content } = req.body;
 
-  // - todo Errorhandler2: body 또는 params 입력받지 못한 경우
-  if (Object.keys(req.body).length === 0) {
-    return res.status(400).json({ success: false, errorMessage: 'body가 비었습니다.' });
+router.post('/comments/:_postId', authMiddleware, async (req, res) => {
+  try {
+    const { _postId } = req.params;
+    const { comment } = req.body;
+
+    console.log(`🐞_postId: ${_postId}`);
+
+    const accessToken = req.cookies.accessToken;
+    const refreshToken = req.cookies.refreshToken;
+
+    console.log(`👹 accessToken: ${accessToken}`);
+    console.log(`👹 refreshToken: ${refreshToken}`);
+    // # 412 body 데이터가 정상적으로 전달되지 않는 경우
+    // {"errorMessage": "데이터 형식이 올바르지 않습니다."}
+    // - todo Errorhandler2: body 또는 params 입력받지 못한 경우
+    if (Object.keys(req.body).length === 0) {
+      return res.status(400).json({ success: false, errorMessage: 'body가 비었습니다.' });
+    }
+
+    // - todo Errorhandler1: content 댓글 내용 빈칸으로 호출 시
+    if (!comment.length) {
+      return res.status(400).json({
+        success: false,
+        errorMessage: '댓글 내용을 입력해주세요.',
+      });
+    }
+
+    // # 403 Cookie가 존재하지 않을 경우
+    if (!refreshToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
+    if (!accessToken) return res.status(400).json({ errorMessage: '로그인이 필요한 기능입니다.' });
+
+    // refresh/access 유효 여부 검사
+    const isAccessTokenValidate = validateToken(accessToken);
+    const isRefreshTokenValidate = validateToken(refreshToken);
+
+    // # 403 Cookie가 비정상적이거나 만료된 경우
+    if (!isRefreshTokenValidate) return res.status(419).json({ errorMessage: '403 전달된 쿠키에서 오류가 발생하였습니다.(Refresh Cookie 없음)' });
+    if (!isAccessTokenValidate) return res.status(419).json({ errorMessage: '403 전달된 쿠키에서 오류가 발생하였습니다.(Access Cookie 없음)' });
+
+    const existsPosts = await Posts.findOne({ where: { postId: _postId } });
+    console.log(`👹 existsPosts: ${existsPosts}`);
+
+    if (!!existsPosts) {
+      await Comments.create({
+        UserId: res.locals.userId,
+        PostId: _postId,
+        comment: comment,
+      });
+      return res.json({ message: '댓글을 작성하였습니다.' });
+    }
+    // # 401 게시글 수정이 실패한 경우
+    return res.status(400).json({ errorMessage: '게시글이 존재하지 않습니다.' });
+  } catch (error) {
+    console.log(`👹 error: ${error}`);
+    // # 400 예외 케이스에서 처리하지 못한 에러
+    return res.status(400).json({ errorMessage: '게시글 작성에 실패하였습니다.' });
   }
-
-  // - todo Errorhandler1: content 댓글 내용 빈칸으로 호출 시
-  if (!content.length) {
-    return res.status(400).json({
-      success: false,
-      errorMessage: '댓글 내용을 입력해주세요.',
-    });
-  }
-
-  // find the post exists
-  const existsPosts = await Posts.find({ _id: _postId });
-  if (existsPosts.length !== 0) {
-    await Comments.create({
-      user: user,
-      password: password,
-      content: content,
-      postId: _postId,
-    });
-    return res.json({ message: '댓글 생성 완료.' });
-  }
-
-  return res.status(400).json({
-    success: false,
-    errorMessage: '해당하는 포스트가 없네요',
-  });
 });
 
 // * 6.댓글 목록 조회
 // url : api/comments/:_postId
 // todo 조회하는 게시글에 작성된 모든 댓글을 목록 형식으로 보는 기능
 // todo 작성 날짜 기준으로 내림차순 정렬
+
 router.get('/comments/:_postId', async (req, res) => {
   try {
     const { _postId } = req.params;
-    const existsPosts = await Posts.find({ _id: _postId });
-    if (existsPosts.length !== 0) {
-      const existsComments = await Comments.find({ postId: _postId }).sort({
-        createdAt: 'desc',
+    const existsPosts = await Posts.findOne({ where: { postId: _postId } });
+    console.log(`👹 existsPosts: ${JSON.stringify(existsPosts)}`);
+
+    // if (!!existsPosts) {
+    //   const [result, metadata] = await sequelize.query(`
+    //     select *
+    //     from Comments
+    //     where PostId =${_postId}
+    //   `);
+    //   console.log(`👹 result: ${result}`);
+
+    //   return res.json({ data: result });
+    // }
+
+    if (!!existsPosts) {
+      const result = await Comments.findAll({
+        where: { PostId: _postId },
+        order: sequelize.literal('createdAt DESC'),
       });
-      const results = existsComments.map((comment) => {
-        return {
-          commentId: comment['_id'],
-          user: comment['user'],
-          content: comment['content'],
-          createdAt: comment['createdAt'],
-        };
-      });
-      return res.json({ data: results });
+
+      if (result) {
+        return res.json({ data: result });
+      }
     }
-  } catch (err) {
-    return res.status(400).json({ success: false, errorMessage: '해당하는 포스트가 없네요' });
+    // # 400 게시글이 없는 경우
+    return res.status(400).json({ errorMessage: '게시글이 존재하지 않습니다.' });
+  } catch (error) {
+    console.log(`👹 error: ${error}`);
+    // # 400 예외 케스서 처하 못한 에러
+    return res.status(400).json({ errorMessage: '댓글 조회에 실패했습니다.' });
   }
 });
+
+// router.get('/comments/:_postId', async (req, res) => {
+//   try {
+//     const { _postId } = req.params;
+//     const existsPosts = await Posts.find({ _id: _postId });
+//     if (existsPosts.length !== 0) {
+//       const existsComments = await Comments.find({ postId: _postId }).sort({
+//         createdAt: 'desc',
+//       });
+//       const results = existsComments.map((comment) => {
+//         return {
+//           commentId: comment['_id'],
+//           user: comment['user'],
+//           content: comment['content'],
+//           createdAt: comment['createdAt'],
+//         };
+//       });
+//       return res.json({ data: results });
+//     }
+//   } catch (err) {
+//     return res.status(400).json({ success: false, errorMessage: '해당하는 포스트가 없네요' });
+//   }
+// });
 
 // * 8.댓글 수정
 // url : api/comments/:_postId
@@ -159,6 +219,16 @@ router.delete('/comments/:_commentId', async (req, res) => {
     errorMessage: 'last gate : 댓글 삭제에 실패했습니다',
   });
 });
+
+// Access Token & Refresh Token 검증 함수
+function validateToken(token) {
+  try {
+    jwt.verify(token, SECRET_KEY);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
 
 // ------------------------------------------
 module.exports = router;
